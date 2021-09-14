@@ -31,6 +31,7 @@ GLuint pbo = 0;     // OpenGL pixel buffer object
 GLuint tex = 0;     // OpenGL texture object
 struct cudaGraphicsResource *cuda_pbo_resource;
 
+int frame = 0;
 
 void render() {
     uchar4 *d_out = 0;
@@ -44,8 +45,10 @@ void render() {
     // Can be deleted. Shows current location in window title
     char title[256];
     const char *oldTitle = TITLE_STRING;
-    sprintf(title, "%s: Location = %d, sys = %d", oldTitle, loc.x, loc.y);
+    sprintf(title, "%s: Frame: %d,  Location = %d, sys = %d", oldTitle,frame, loc.x, loc.y);
+    frame++;
     glutSetWindowTitle(title);
+    glutPostRedisplay();
 }
 
 void drawTexture() {
