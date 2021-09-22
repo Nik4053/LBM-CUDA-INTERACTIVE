@@ -1,7 +1,7 @@
 #ifndef INTERACTIONS_H
 #define INTERACTIONS_H
-#define W 200
-#define H 80
+#define W 400*1
+#define H 80*1
 #define DELTA 5 // pixel increment for arrow keys
 #define TITLE_STRING "flashlight: distance image display app"
 int2 loc = {W / 2, H / 2};

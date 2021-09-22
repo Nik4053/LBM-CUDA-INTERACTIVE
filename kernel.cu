@@ -112,7 +112,7 @@ void collideFluidCells(GpuData* gd, const int y, const int x) {
     {
         double uTu = velX * velX + velY * velY;
         double cTu = cy[i] * velY + cx[i] * velX;
-        double feq = weights[i] * (density  + 3 * cTu + 9.0 / 2 * cTu * cTu - 3.0 * uTu/2);
+        double feq = weights[i] * (density  + 3 * cTu + 9.0 / 2 * cTu * cTu - 3.0 * uTu/2.0);
         gd->grid[i][idx] = gd->grid[i][idx] - (1.0 / gd->relaxTime) * (gd->grid[i][idx] - feq);
     }
     
@@ -133,13 +133,7 @@ void collideFluidCells(GpuData* gd, const int y, const int x) {
 #endif
 }
 
-__global__
-void step1(GpuData* gd) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
-    collideFluidCells(gd, y, x); 
-}
+
 
 
 __device__
@@ -164,7 +158,7 @@ void preprocessBoundaries(GpuData* gd, const int y, const int x) {
         // if (x == 0 && cx[i] == -1) continue;
         // if (y == gd->h - 1 && cy[i] == 1) continue;
         // if (x == gd->w - 1 && cx[i] == 1) continue;
-        int dstIdx = idx + cy[i] * gd->w + cx[i];//+ gd->cIdx[i]; 
+        int dstIdx = idx + gd->cIdx[i];//idx + cy[i] * gd->w + cx[i];// 
         if (y == 0 && cy[i] == -1) continue;
         if (cy[i] + y >= gd->h) continue;
         if (x == 0 && cx[i] == -1) continue;
@@ -174,10 +168,6 @@ void preprocessBoundaries(GpuData* gd, const int y, const int x) {
         if (dstIdx < 0 || dstIdx >= maxIdx) continue; //check bounds TODO can be removed
         if (gd->type[dstIdx] != FLUID_CELL) continue;
         gd->grid[i][idx] = gd->grid[DirInverse[i]][dstIdx]; // pull 
-        if (idx == 0) {
-            int converter[9] = { 4,3,5,1,7,0,2,6,8 };
-            printf("CUDA: idx = %d,\t i = %d,\t dstIdx = %d,\t invI =%d\t,newVal=%f  \n",idx, converter[i],dstIdx, converter[DirInverse[i]], gd->grid[DirInverse[i]][dstIdx]);
-        }
         if (gd->type[idx] == OBSTACLE_BOUNDARY) // calculate forces
         {
             gd->forceX[idx] += 2 * gd->grid[i][idx] * cx[i];
@@ -199,7 +189,7 @@ void handleBoundaries(GpuData* gd, const int y, const int x) {
         for (size_t i = 0; i < 9; i++)
         {
             double cu = cx[i] * gd->velInX + cy[i] * gd->velInY;
-            gd->grid[i][idx] = gd->grid[i][idx] - 6 * weights[i] * cu;
+            gd->grid[i][idx] = gd->grid[i][idx] + /*+*/ 6 * weights[i] * cu; // TODO here ERROR
         }
     }
     //boundary handling density
@@ -212,7 +202,7 @@ void handleBoundaries(GpuData* gd, const int y, const int x) {
             double cu = cx[i] * velX + cy[i] * velY;
             double rho_out = 1; // TODO param
             double uu = velX * velX + velY * velY;
-            gd->grid[i][idx] = -gd->grid[i][idx] + 2 * weights[i] * (rho_out + (9.0 / 2.0) * cu * cu - (3.0 / 2.0) * uu);
+            gd->grid[i][idx] = - gd->grid[i][idx] + 2 * weights[i] * (rho_out + (9.0 / 2.0) * cu * cu - (3.0 / 2.0) * uu);
         }
     }
 }
@@ -230,11 +220,19 @@ void stream(GpuData* gd, const int y, const int x) {
     }
 }
 __global__
+void step1(GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    collideFluidCells(gd, y, x);
+}
+__global__
 void step2(GpuData* gd) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
     preprocessBoundaries(gd, y, x);
+    handleBoundaries(gd, y, x);
 }
 
 __global__
@@ -245,13 +243,7 @@ void step3(GpuData* gd) {
     handleBoundaries(gd, y, x);
 }
 
-__global__
-void step4(GpuData* gd) {
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
-    stream(gd, y, x);
-}
+
 
 __device__
 void swapData(GpuData* gd, const int y, const int x) {
@@ -276,6 +268,14 @@ void swapData(GpuData* gd, const int y, const int x) {
 }
 
 __global__
+void step4(GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    stream(gd, y, x);
+    //swapData(gd, y, x);
+}
+__global__
 void step5(GpuData* gd) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -297,6 +297,39 @@ void imageKernelDensity(uchar4* d_out, GpuData* gd) {
     d_out[idx].w = 255;
 
 }
+
+__global__
+void imageKernelType(uchar4* d_out, GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    const int idx = x + y * gd->w; // 1D indexing
+    d_out[idx].x = 0;
+    d_out[idx].y = 0;
+    d_out[idx].z = 0;
+    switch (gd->type[idx])
+    {
+    case FLUID_CELL:
+        //d_out[idx].x = 255;
+        break;
+    case NO_SLIP_BOUNDARY:
+        d_out[idx].x = 255;
+        d_out[idx].y = 255;
+        break;
+    case VELOCITY_BOUNDARY:
+        d_out[idx].z = 100;
+        break;
+    case DENSITY_BOUNDARY:
+        d_out[idx].z = 255;
+        break;
+    case OBSTACLE_BOUNDARY:
+        d_out[idx].y = 255;
+        break;
+    default:
+        break;
+    }
+    d_out[idx].w = 255;
+}
 __global__
 void imageKernel(uchar4* d_out, GpuData* gd) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -305,8 +338,23 @@ void imageKernel(uchar4* d_out, GpuData* gd) {
     const int idx = x + y * gd->w; // 1D indexing
     fillDensity(gd, idx);
     fillVelocity(gd, idx);
-    d_out[idx].x =  clip(fabs(gd->velX[idx] * 10000));
-    d_out[idx].y =  clip(fabs(gd->velY[idx] * 10000));
+    d_out[idx].x = clip(fabs(gd->velX[idx] * 10000));
+    d_out[idx].y = clip(fabs(gd->velY[idx] * 10000));
+    d_out[idx].z = 0;
+    d_out[idx].w = 255;
+
+}
+__global__
+void imageKernelMagnitude(uchar4* d_out, GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    const int idx = x + y * gd->w; // 1D indexing
+    fillDensity(gd, idx);
+    fillVelocity(gd, idx);
+    double vel = gd->velX[idx] * gd->velX[idx] + gd->velY[idx] * gd->velY[idx];
+    d_out[idx].x = clip(fabs(vel * 100000));
+    d_out[idx].y = 0;// clip(fabs(gd->velY[idx] * 10000));
     d_out[idx].z = 0;
     d_out[idx].w = 255;
 
@@ -341,24 +389,28 @@ void kernelLauncher(uchar4 *d_out, int2 pos) {
     free(velXCPU);
 #endif // DEBUG
     //Sleep(20);
-    step1 << <gridSize, blockSize >> >(gpuDataLOCAL);
-    gpuErrchk(cudaPeekAtLastError());
-    cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
-    step2 << <gridSize, blockSize >> > (gpuDataLOCAL);
-    gpuErrchk(cudaPeekAtLastError());
-    cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
-    
-    step3 << <gridSize, blockSize >> > (gpuDataLOCAL);
-    gpuErrchk(cudaPeekAtLastError());
-    cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
-    step4 << <gridSize, blockSize >> > (gpuDataLOCAL);
-    gpuErrchk(cudaPeekAtLastError());
-    cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
-    step5 << <gridSize, blockSize >> > (gpuDataLOCAL);
-    gpuErrchk(cudaPeekAtLastError());
-    cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
-    
-    imageKernel << <gridSize, blockSize >> > (d_out, gpuDataLOCAL);
+    for (size_t iter = 0; iter < 100; iter++)
+    {
+        step1 << <gridSize, blockSize >> > (gpuDataLOCAL);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+        step2 << <gridSize, blockSize >> > (gpuDataLOCAL);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+
+        //step3 << <gridSize, blockSize >> > (gpuDataLOCAL);
+        //gpuErrchk(cudaPeekAtLastError());
+        //cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+        step4 << <gridSize, blockSize >> > (gpuDataLOCAL);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+        step5 << <gridSize, blockSize >> > (gpuDataLOCAL);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+
+    }
+
+    //imageKernelMagnitude << <gridSize, blockSize >> > (d_out, gpuDataLOCAL);
     gpuErrchk(cudaPeekAtLastError());
     cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
    
@@ -434,7 +486,8 @@ void initgrid(CellType* type, PRECISION** grid,int width, int height) {
             //type[idx] = NO_SLIP_BOUNDARY;
         }
     }
-    setObstacleSphere(type, grid, 40, 100, 20, height, width, nonsense_weights);
+    //setObstacleSphere(type, grid, 60 , 200, 20, height, width, nonsense_weights);
+    setObstacleSphere(type, grid, 40*1, 100*1, 20*1, height, width, nonsense_weights);
 }
 
 
@@ -450,7 +503,7 @@ void init(int w, int h) {
     gpuDataCPU->h = h;
     gpuDataCPU->velInX = 0.02;
     gpuDataCPU->velInY = 0; // Not supported
-    gpuDataCPU->Re = 40;
+    gpuDataCPU->Re = 4000;
     gpuDataCPU->relaxTime = 3 * gpuDataCPU->velInX * ((double)h - 2) / gpuDataCPU->Re + 0.5;
     size_t arrSize = gpuDataCPU->h * gpuDataCPU->w;
     CellType* typeCPU = (CellType*)malloc(arrSize * sizeof(CellType));

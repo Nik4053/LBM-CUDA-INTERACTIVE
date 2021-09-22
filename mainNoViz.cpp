@@ -26,10 +26,10 @@ inline float printCUDATime(bool print) {
 }
 
 int simMainNoViz(int argc, char **argv) {
-    size_t frames = 600;
+    size_t frames = 60;
     std::cout << "Simulating " << frames << " frames..." << std::endl;
-    int w = 1600;
-    int h = 1600;
+    int w = 400*4;
+    int h = 80*4;
     uchar4 *imageCUDA;
     gpuErrchk(cudaMalloc((void **) &imageCUDA, w * h * sizeof(imageCUDA)));
     int2 loc = {0, 0};
