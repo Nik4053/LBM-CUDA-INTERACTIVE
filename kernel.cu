@@ -353,10 +353,10 @@ void imageKernelMagnitude(uchar4* d_out, GpuData* gd) {
     fillDensity(gd, idx);
     fillVelocity(gd, idx);
     double vel = gd->velX[idx] * gd->velX[idx] + gd->velY[idx] * gd->velY[idx];
-    d_out[idx].x = clip(fabs(vel * 100000));
+    d_out[idx].x = clip(fabs(sqrt(vel) * 5000)); //clip(fabs(vel * 100000));//
     d_out[idx].y = 0;// clip(fabs(gd->velY[idx] * 10000));
     d_out[idx].z = 0;
-    d_out[idx].w = 255;
+    d_out[idx].w = 255;// clip(fabs(vel * 100000)); ;
 
 }
 __global__
@@ -410,7 +410,7 @@ void kernelLauncher(uchar4 *d_out, int2 pos) {
 
     }
 
-    //imageKernelMagnitude << <gridSize, blockSize >> > (d_out, gpuDataLOCAL);
+    imageKernelMagnitude << <gridSize, blockSize >> > (d_out, gpuDataLOCAL);
     gpuErrchk(cudaPeekAtLastError());
     cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
    
