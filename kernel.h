@@ -19,7 +19,7 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort =
 
 
 
-void kernelLauncher(uchar4 *d_out, int2 pos);
+void kernelLauncher(uchar4 *d_out, int2 pos,bool removeMode, bool resetFluid);
 
 
 void init(int w, int h);

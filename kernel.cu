@@ -345,6 +345,18 @@ void imageKernel(uchar4* d_out, GpuData* gd) {
 
 }
 __global__
+void imageKernelForce(uchar4* d_out, GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    const int idx = x + y * gd->w; // 1D indexing
+    d_out[idx].x = clip(-gd->forceY[idx] * 500);
+    d_out[idx].y = clip(gd->forceY[idx] * 500);
+    d_out[idx].z = 0;
+    d_out[idx].w = 255;
+
+}
+__global__
 void imageKernelMagnitude(uchar4* d_out, GpuData* gd) {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -357,6 +369,34 @@ void imageKernelMagnitude(uchar4* d_out, GpuData* gd) {
     d_out[idx].y = 0;// clip(fabs(gd->velY[idx] * 10000));
     d_out[idx].z = 0;
     d_out[idx].w = 255;// clip(fabs(vel * 100000)); ;
+    switch (gd->type[idx])
+    {
+    case FLUID_CELL:
+        //d_out[idx].x = 255;
+        break;
+    case NO_SLIP_BOUNDARY:
+        d_out[idx].x = 255;
+        d_out[idx].y = 255;
+        d_out[idx].z = 0;
+        break;
+    case VELOCITY_BOUNDARY:
+        d_out[idx].x = 0;
+        d_out[idx].y = 0;
+        d_out[idx].z = 100;
+        break;
+    case DENSITY_BOUNDARY:
+        d_out[idx].x = 0;
+        d_out[idx].y = 0;
+        d_out[idx].z = 255;
+        break;
+    case OBSTACLE_BOUNDARY:
+        d_out[idx].x = 0;
+        d_out[idx].y = 255;
+        d_out[idx].z = 0;
+        break;
+    default:
+        break;
+    }
 
 }
 __global__
@@ -368,8 +408,44 @@ void fillDensityVelocityKernel(GpuData* gd) {
     fillDensity(gd, idx);
     fillVelocity(gd, idx);
 }
+#ifdef DEBUG
 int ww, hh;
-void kernelLauncher(uchar4 *d_out, int2 pos) {
+#endif // DEBUG
+
+__global__
+void toggleObstacle(GpuData* gd, int2 pos,bool removeMode) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    int2 bounds = {3,3};
+    if (pos.x + bounds.x < x || pos.x - bounds.x > x || pos.y + bounds.y < y || pos.y - bounds.y > y) {
+           return;
+    }
+    //printf("toggle: %d, %d \n",pos.x,pos.y);
+    const int idx = x + y * gd->w; // 1D indexing
+    if (gd->type[idx] == OBSTACLE_BOUNDARY || gd->type[idx] == FLUID_CELL) {
+        if(!removeMode)
+            gd->type[idx] = OBSTACLE_BOUNDARY;
+        else
+            gd->type[idx] = FLUID_CELL;
+    }
+    //gd->type[idx] = OBSTACLE_BOUNDARY;
+}
+__global__
+void resetFluidCells(GpuData* gd) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((x >= gd->w) || (y >= gd->h)) return; // Check if within image bounds
+    const int idx = x + y * gd->w; // 1D indexing
+    if (gd->type[idx] == FLUID_CELL) {
+        for (size_t i = 0; i < 9; i++)
+        {
+            gd->grid[i][idx] = weights[i];
+        }
+    }
+}
+int2 oldPos = { 0,0 };
+void kernelLauncher(uchar4 *d_out, int2 pos, bool removeMode, bool resetFluid) {
 #ifdef DEBUG
     fillDensityVelocityKernel << <gridSize, blockSize >> > (gpuDataLOCAL);
     cudaMemcpy(gpuDataCPU, gpuDataLOCAL,  sizeof(GpuData), cudaMemcpyDeviceToHost); gpuErrchk(cudaPeekAtLastError());
@@ -388,8 +464,21 @@ void kernelLauncher(uchar4 *d_out, int2 pos) {
     }
     free(velXCPU);
 #endif // DEBUG
+    if (resetFluid) {
+        resetFluidCells << <gridSize, blockSize >> > (gpuDataLOCAL);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+    }
+
+    if (oldPos.x != pos.x && oldPos.y != pos.y) {
+        toggleObstacle << <gridSize, blockSize >> > (gpuDataLOCAL, pos, removeMode);
+        gpuErrchk(cudaPeekAtLastError());
+        cudaDeviceSynchronize(); gpuErrchk(cudaPeekAtLastError());
+        oldPos.x = pos.x;
+        oldPos.y = pos.y;
+    }
     //Sleep(20);
-    for (size_t iter = 0; iter < 100; iter++)
+    for (size_t iter = 0; iter < 10; iter++)
     {
         step1 << <gridSize, blockSize >> > (gpuDataLOCAL);
         gpuErrchk(cudaPeekAtLastError());
@@ -492,8 +581,12 @@ void initgrid(CellType* type, PRECISION** grid,int width, int height) {
 
 
 void init(int w, int h) {
+#ifdef DEBUG
     ww = w;
     hh = h;
+#endif // DEBUG
+
+
     gridSize = dim3((w + blockSize.x - 1) / blockSize.x, (h + blockSize.y - 1) / blockSize.y,
         1); // + TX - 1 for w size that is not divisible by TX
     // alloc cpu version of struct
@@ -502,8 +595,8 @@ void init(int w, int h) {
     gpuDataCPU->w = w;
     gpuDataCPU->h = h;
     gpuDataCPU->velInX = 0.02;
-    gpuDataCPU->velInY = 0; // Not supported
-    gpuDataCPU->Re = 4000;
+    gpuDataCPU->velInY = 0.0; // Not supported
+    gpuDataCPU->Re = 400;
     gpuDataCPU->relaxTime = 3 * gpuDataCPU->velInX * ((double)h - 2) / gpuDataCPU->Re + 0.5;
     size_t arrSize = gpuDataCPU->h * gpuDataCPU->w;
     CellType* typeCPU = (CellType*)malloc(arrSize * sizeof(CellType));

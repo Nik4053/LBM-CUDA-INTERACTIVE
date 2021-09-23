@@ -39,13 +39,14 @@ void render() {
     cudaGraphicsResourceGetMappedPointer((void **) &d_out, NULL,
                                          cuda_pbo_resource);
 
-    kernelLauncher(d_out,loc);
+    kernelLauncher(d_out,loc, removeMode,resetFluid);
+    resetFluid = false;
     cudaGraphicsUnmapResources(1, &cuda_pbo_resource, 0);
 
     // Can be deleted. Shows current location in window title
     char title[256];
     const char *oldTitle = TITLE_STRING;
-    sprintf(title, "%s: Frame: %d,  Location = %d, sys = %d", oldTitle,frame, loc.x, loc.y);
+    sprintf(title, "%s: Frame: %d,  Location = %d, sys = %d, RemoveMode=%d", oldTitle,frame, loc.x, loc.y,removeMode);
     frame++;
     glutSetWindowTitle(title);
     glutPostRedisplay();

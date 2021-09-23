@@ -1,22 +1,25 @@
 #ifndef INTERACTIONS_H
 #define INTERACTIONS_H
-#define W 400*1
-#define H 80*1
+#define W 400*2
+#define H 80*2
 #define DELTA 5 // pixel increment for arrow keys
 #define TITLE_STRING "flashlight: distance image display app"
-int2 loc = {W / 2, H / 2};
-bool dragMode = false; // mouse tracking mode
+int2 loc = {0, 0};
+bool dragMode = true; // mouse tracking mode
+bool removeMode = false;
+bool resetFluid = false;
 
 void keyboard(unsigned char key, int x, int y) {
-    if (key == 'a') dragMode = !dragMode; // toggle tracking mode
+    if (key == 'a') removeMode = !removeMode; // toggle removeMode mode
+    if (key == 'b') resetFluid = true; // toggle removeMode mode
     if (key == 27) exit(0);
     glutPostRedisplay();
 }
 
 void mouseMove(int x, int y) {
     if (dragMode) return;
-    loc.x = W * x / glutGet(GLUT_WINDOW_WIDTH);
-    loc.y = H * y / glutGet(GLUT_WINDOW_HEIGHT);
+    //loc.x = W * x / glutGet(GLUT_WINDOW_WIDTH);
+    //loc.y = H * y / glutGet(GLUT_WINDOW_HEIGHT);
     glutPostRedisplay();
 }
 
@@ -80,9 +83,9 @@ void handleSpecialKeypress(int key, int x, int y) {
 }
 
 void printInstructions() {
-    printf("flashlight interactions\n");
-    printf("a: toggle mouse tracking mode\n");
-    printf("arrow keys: move ref location\n");
+    printf("LBM\n");
+    printf("a: toggle obstacle add/delete mode\n");
+    printf("b: restart fluid\n");
     printf("esc: close graphics window\n");
 }
 
